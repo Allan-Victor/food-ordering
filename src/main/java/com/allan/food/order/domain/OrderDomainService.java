@@ -45,7 +45,7 @@ public interface OrderDomainService {
      * <p>This is a <em>factory</em> in Evans' sense: creation requires
      * knowledge held by another aggregate, so it cannot live in {@code Order}'s
      * own constructor. The service resolves each requested product against the
-     * live menu, builds line items at the restaurant's authoritative prices,
+     * live menu, confirms each line at the restaurant's authoritative prices,
      * and only then constructs the order.
      *
      * <p><strong>Prices are server-derived.</strong> The caller supplies

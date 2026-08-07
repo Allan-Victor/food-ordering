@@ -64,64 +64,120 @@ public class Order {
     }
 
     /**
-     * Creates a new, valid, {@code PENDING} order.
+     * Creates a new, valid, {@code PENDING} order from confirmed line data.
      *
-     * <p>Enforces the aggregate invariants: at least one item, a positive total,
-     * and a total that equals the sum of the line subtotals. Assigns the order id,
-     * a tracking id, and sequential item positions before returning.
+     * <p>Takes {@link ConfirmedItem} records rather than assembled
+     * {@link OrderItem}s, because only the root may create items — it alone
+     * knows their positions, and extending the aggregate's contents is the
+     * root's responsibility. The caller (the domain service) supplies product
+     * details already confirmed against the restaurant's menu; this method
+     * assembles them into positioned items, derives the total, and validates.
+     *
+     * <p>The total is computed here rather than accepted as an argument, which
+     * makes the invariant "total equals the sum of the lines" true by
+     * construction instead of merely checked.
      */
     public static Order create(UUID customerId, UUID restaurantId,
                                StreetAddress deliveryAddress,
-                               Money price, List<OrderItem> items) {
+                               List<ConfirmedItem> confirmedItems) {
 
         if (customerId == null) throw new OrderDomainException("Customer Id required");
         if (restaurantId == null) throw new OrderDomainException("Restaurant Id required");
         if (deliveryAddress == null) throw new OrderDomainException("Delivery Address required");
-        if (items == null || items.isEmpty()) {
+        if (confirmedItems == null || confirmedItems.isEmpty()) {
             throw new OrderDomainException("An order must have at least one item");
         }
-        if (price == null || !price.isGreaterThanZero()) {
-            throw new OrderDomainException("Total price must be greater than zero");
+        List<OrderItem> items = new ArrayList<>(confirmedItems.size());
+        int position = 1;
+        for (ConfirmedItem confirmed : confirmedItems) {
+            items.add(OrderItem.of(
+                    position++,
+                    confirmed.productId(),
+                    confirmed.productName(),
+                    confirmed.quantity(),
+                    confirmed.price()
+            ));
         }
 
+
         // invariant: stated total == sum of line subtotals
-        Money itemsTotal = items.stream()
+        Money price = items.stream()
                 .map(OrderItem::subTotal)
                 .reduce(Money::add)
                 .orElseThrow(() -> new OrderDomainException("No items to total"));
 
-        if (!price.equals(itemsTotal)) {
-            throw new OrderDomainException("Total price %s does not equal items total %s"
-                    .formatted(price.amount(), itemsTotal.amount()));
+        if (!price.isGreaterThanZero()) {
+            throw new OrderDomainException("Total price must be greater than zero");
         }
-        Order order =  new Order(UUID.randomUUID(), customerId, restaurantId, UUID.randomUUID(),
+        return new Order(UUID.randomUUID(), customerId, restaurantId, UUID.randomUUID(),
                 deliveryAddress, price, items, OrderStatus.PENDING);
-        order.assignItemPositions();
-        return order;
     }
 
+
     /**
-     * The root assigns identity to its children. Items arrive
-     * position-less and only become identifiable inside an aggregate -
-     * which is exactly right: an OrderItem has no meaning outside its Order.
+     * A line's details once confirmed against the restaurant's menu: what the
+     * customer asked for, priced and named by the restaurant.
+     *
+     * <p>Distinct from {@link OrderItem} because it carries no position — it is
+     * input to the aggregate, not part of it. The root turns these into
+     * positioned items.
      */
-    private void assignItemPositions() {
-        int position = 1;
-        for (OrderItem item: items) {
-            item.assignPosition(position++);
-        }
-    }
+    public record ConfirmedItem(UUID productId, String productName, int quantity, Money price) {}
+
+    // ────────────────────────────────────────────────────────────────
+    //  Reconstitution input — a line as stored in the database.
+    //  Carries its position, because on the way back the stored position
+    //  is authoritative and must be restored, not reassigned from 1.
+    // ────────────────────────────────────────────────────────────────
+    public record PersistedItem(int position, UUID productId, String productName,
+                                int quantity, Money price) {}
 
     /**
-     * Rebuilds an order from persisted state without running business rules.
-     * For the persistence mapper only - Package private.
+     * Rebuilds an order from persisted state, running no business rules.
+     *
+     * <p><strong>For the persistence mapper only.</strong> Package-private, so
+     * nothing outside the domain can fabricate an order in an arbitrary state.
+     *
+     * <p><strong>Why it does not re-run creation.</strong> The stored state was
+     * already valid when it was saved, and it may be a state {@code create}
+     * could never produce — a {@code CANCELLED} order cannot be created,
+     * only arrived at. Re-running creation rules on load would reject legitimate
+     * historical orders.
+     *
+     * <p><strong>Why the total is accepted, not derived.</strong> {@code create}
+     * derives the total to make the "total equals sum of lines" invariant true by
+     * construction. Reconstitution does the opposite and trusts the stored total:
+     * it is a historical fact. If a product's menu price was corrected after this
+     * order was placed, recomputing the total on load would silently rewrite what
+     * the customer actually agreed to pay. The stored figure is authoritative.
+     *
+     * <p><strong>Why positions are restored, not reassigned.</strong> The stored
+     * positions are the identities the items had when saved. Renumbering them
+     * from 1 would work only by accident (if the database returned them in order)
+     * and would corrupt identity if it did not. They are restored exactly.
+     *
+     * <p>The mapper hands over flat {@link PersistedItem} records rather than
+     * assembled {@link OrderItem}s, because {@code OrderItem} construction is
+     * sealed inside this aggregate. The root assembles them — symmetric with how
+     * {@code create} assembles {@link ConfirmedItem}s.
      */
     static Order reconstitute(UUID orderId, UUID customerId, UUID restaurantId, UUID trackingId,
                               StreetAddress deliveryAddress, Money price,
-                              List<OrderItem> items, OrderStatus orderStatus,
+                              List<PersistedItem> persistedItems, OrderStatus orderStatus,
                               List<String> failureMessages) {
+
+        List<OrderItem> items = persistedItems.stream()
+                .map(p -> OrderItem.of(
+                        p.position(),
+                        p.productId(),
+                        p.productName(),
+                        p.quantity(),
+                        p.price()))
+                .toList();
+
         Order order = new Order(orderId, customerId, restaurantId, trackingId,
                 deliveryAddress, price, items, orderStatus);
+
         if (failureMessages != null) {
             order.failureMessages.addAll(failureMessages);
         }

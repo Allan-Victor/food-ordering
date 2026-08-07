@@ -1,7 +1,9 @@
 package com.allan.food.order.domain.model.entity;
 
 import com.allan.food.order.domain.model.valueobject.Money;
+import com.allan.food.order.domain.model.valueobject.StreetAddress;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -13,11 +15,20 @@ import java.util.UUID;
  * purpose — so they need identity. A value object would collapse them in a
  * {@code Set} and make them indistinguishable when editing one.
  *
- * <p><strong>Identity is a position, not a UUID.</strong> The id is a sequential
- * position (1, 2, 3…) scoped to the parent order. "Item 2 on your order" is
- * meaningful on an invoice; a random UUID is not. The position is assigned by
- * the {@link Order} root at creation — see {@link #assignPosition} — which is
- * why it is the one non-final field.
+ * <p><strong>Identity is a position, not a UUID.</strong> The identity is a
+ * sequential position (1, 2, 3…) scoped to the parent order. "Item 2 on your order" is
+ * meaningful on an invoice; a random UUID is not. The position is supplied by
+ * the {@link Order} root at creation — see
+ * {@link Order#create} — because an order item has no identity, and no meaning,
+ * outside the aggregate that contains it.
+ *
+ * <p><strong>Fully immutable.</strong> Every field is final and set once. An
+ * earlier shape assigned the position after construction through a
+ * package-private mutator, which meant an item briefly existed without identity
+ * and required a guard against reassignment. Taking the position as a
+ * constructor argument removes both the mutable field and the guard: the item is
+ * complete the moment it exists. Immutability is also what makes this safe to
+ * share across threads without synchronisation.
  *
  * <p><strong>Price is captured, subtotal is derived.</strong> The price is the
  * amount confirmed from the menu at the moment of ordering and is frozen here,
@@ -26,19 +37,22 @@ import java.util.UUID;
  * would invite a value that disagrees with its own definition.
  */
 public final class OrderItem {
-    private int position;          // 0 until assigned by Order.create()
+    private final int position;
     private final UUID productId;
     private final String productName;
     private final int quantity;
     private final Money price;
     private final Money subTotal;
 
-    private OrderItem(UUID productId, String productName, int quantity, Money price) {
+    private OrderItem(int position, UUID productId, String productName, int quantity, Money price) {
+        if (position <= 0) throw new IllegalArgumentException("position must be positive: " +position);
         if (productId == null) throw  new IllegalArgumentException("productId required");
         if (price == null) throw new IllegalArgumentException("price required");
         if (quantity <= 0) throw new IllegalArgumentException("quantity must be positive: " + quantity);
         if (!price.isGreaterThanZero()) throw new IllegalArgumentException("price must be > 0");
+        if (productName == null || productName.isBlank()) throw new IllegalArgumentException("productName is required");
 
+        this.position = position;
         this.productId = productId;
         this.productName = productName;
         this.quantity = quantity;
@@ -46,26 +60,18 @@ public final class OrderItem {
         this.subTotal = price.multiply(quantity); // derived, always consistent
     }
 
-    public static OrderItem of(UUID productId, String productName, int quantity, Money price) {
-        return new OrderItem(productId, productName, quantity, price);
+    /**
+     * Creates a line item at the given position within its order.
+     *
+     * <p>Package-private: only {@link Order} may create order items, because
+     * only the root knows the correct position and only the root may extend its
+     * own boundary. Callers outside the aggregate express what they want through
+     * {@code Order.create}, not by assembling items directly.
+     */
+    static OrderItem of(int position, UUID productId, String productName, int quantity, Money price) {
+        return new OrderItem(position,productId, productName, quantity, price);
     }
 
-    /**
-     * Assigns this item's position within its order.
-     *
-     * <p>Package-private and single-use: only {@link Order} may call it, and
-     * only once. This is the aggregate root controlling the identity of its
-     * children — nothing outside the boundary can number or renumber items.
-     */
-    void assignPosition(int position) {
-        if (this.position != 0) {
-            throw new IllegalStateException("Position already assigned: " +this.position);
-        }
-        if (position <= 0) {
-            throw new IllegalArgumentException("Position must be positive");
-        }
-        this.position = position;
-    }
 
     /*
      * Accessors use the no-"get" style (id() not getId()) to match
@@ -85,16 +91,15 @@ public final class OrderItem {
     /**
      * Entity equality: by position within the parent order.
      *
-     * <p>An unassigned item (position 0) equals only itself, by reference. Two
-     * not-yet-parented items have no identity to compare, so they are treated as
-     * unequal — which keeps them from colliding in a {@code Set} before the
-     * order has numbered them.
+     * <p>The class is {@code final}, so {@code instanceof} is symmetric here and
+     * the usual {@code getClass()}-versus-{@code instanceof} dilemma does not
+     * arise — no subclass can exist to break it.
      */
     @Override
     public boolean equals(Object o) {
         if (this == o) return true; // means an unassigned item still equals itself
         if (!(o instanceof OrderItem orderItem)) return false;
-        return position != 0 && position == orderItem.position; // unassigned == no identity
+        return position == orderItem.position; // unassigned == no identity
     }
 
     @Override

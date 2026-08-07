@@ -43,11 +43,12 @@ public class OrderDomainServiceImpl implements OrderDomainService{
         * Resolve each request against the menu. requireProduct throws on an
         * unknown item rather than skipping it: an order for something the
         * restaurant does not sell is a business error, not a no-op
+        * The result carries the restaurant's authoritative name and price - never the client's
         * */
-        List<OrderItem> items = requestedItems.stream()
+        List<Order.ConfirmedItem> confirmedItems = requestedItems.stream()
                 .map(requestedItem -> {
                     Product product = restaurant.requireProduct(requestedItem.productId());
-                    return OrderItem.of(
+                    return new Order.ConfirmedItem(
                             product.productId(),
                             product.name(),     // confirmed name, from the menu
                             requestedItem.quantity(),
@@ -55,21 +56,15 @@ public class OrderDomainServiceImpl implements OrderDomainService{
                 })
                 .toList();
 
-        // Derived, never supplied. The total cannot disagree with its own lines.
-        Money price = items.stream()
-                .map(OrderItem::subTotal)
-                .reduce(Money::add)
-                .orElseThrow(() -> new OrderDomainException("An order must have at least one item"));
-
-        /*
-        Order.create validates its invariants and assigns identity, so the
-        aggregate is complete and valid the moment it exists. There is no
-        separate initialise-then-validate sequence a caller would get wrong.
-         */
-        Order order = Order.create(customerId, restaurant.id(), deliveryAddress, price, items);
+        // The aggregate assembles positioned items, derives the total, and
+        // validates its invariants. The service no longer computes the total
+        // itself — that responsibility moved into Order.create, where the
+        // "total equals sum of lines" invariant is now true by construction.
+        Order order = Order.create(customerId, restaurant.id(), deliveryAddress, confirmedItems);
 
         log.info("Order {} created for customer {} at restaurant {}",
                 order.orderId(), customerId, restaurant.id());
+
         return new OrderCreationResult(order, OrderCreatedEvent.from(order));
     }
 
