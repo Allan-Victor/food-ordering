@@ -12,11 +12,30 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Order Aggregate root.
- * <p>
- * ONE public entrance: create(). It validates, assigns identity, and
- * sets initial state in a single step - so there is no window in which
- * an Order exists un - initialised or unvalidated.
+ * The order aggregate root: the consistency boundary over an order and its line
+ * items, and the transaction boundary for any change to them.
+ *
+ * <p><strong>One validated entrance.</strong> {@link #create} is the sole way to
+ * make a new order. It validates every invariant, assigns identity, and sets the
+ * initial state in a single step, so there is no window in which a partially
+ * built or unvalidated order exists.
+ *
+ * <p><strong>Reconstitution is separate from creation.</strong> {@link
+ * #reconstitute} rebuilds an order from storage and runs <em>no</em> business
+ * rules, because the stored state was already valid when saved and a cancelled
+ * order could never pass back through {@code create}. It is package-private so
+ * that only the persistence mapper uses it.
+ *
+ * <p><strong>State transitions live here.</strong> Each of {@code pay},
+ * {@code approve}, {@code initCancel}, {@code cancel} guards the current state
+ * and throws on an illegal move. These guards are also the idempotency mechanism
+ * once the saga drives them by at-least-once messages: a duplicate {@code pay}
+ * finds the order no longer {@code PENDING} and is rejected rather than silently
+ * repeated.
+ *
+ * <p><strong>Encapsulation.</strong> Incoming collections are defensively copied
+ * and outgoing ones exposed unmodifiable, so no caller can mutate the aggregate's
+ * internals from outside the root.
  */
 @AggregateRoot
 public class Order {
@@ -45,9 +64,11 @@ public class Order {
     }
 
     /**
-     * The only way to Create a new Order.
-     * It is a Business event, not an allocation
-     * Validation is done at construction
+     * Creates a new, valid, {@code PENDING} order.
+     *
+     * <p>Enforces the aggregate invariants: at least one item, a positive total,
+     * and a total that equals the sum of the line subtotals. Assigns the order id,
+     * a tracking id, and sequential item positions before returning.
      */
     public static Order create(UUID customerId, UUID restaurantId,
                                StreetAddress deliveryAddress,
@@ -92,11 +113,8 @@ public class Order {
     }
 
     /**
-     * Rebuilds an Order from storage. NO business rules run - this state
-     * was already valid when it was saved and a CANCELLED order could
-     * not legally pass through create().
-     * <p>
-     * Package-private: only the persistence mapper may call it.
+     * Rebuilds an order from persisted state without running business rules.
+     * For the persistence mapper only - Package private.
      */
     static Order reconstitute(UUID orderId, UUID customerId, UUID restaurantId, UUID trackingId,
                               StreetAddress deliveryAddress, Money price,
@@ -111,24 +129,33 @@ public class Order {
     }
 
     // ----- State Transitions -----
+
+    /** {@code PENDING → PAID}. */
     public void pay() {
         requireStatus(OrderStatus.PENDING);
         orderStatus = OrderStatus.PAID;
     }
 
+    /** {@code PAID → APPROVED}. */
     public void approve() {
         requireStatus(OrderStatus.PAID);
         orderStatus = OrderStatus.APPROVED;
     }
 
-    /** Semantic lock for the compensation path */
+    /**
+     * {@code PAID → CANCELLING}. Begins compensation after a downstream failure
+     * and records why, acquiring the semantic lock while payment is rolled back.
+     */
     public void initCancel(List<String> reasons) {
         requireStatus(OrderStatus.PAID);
         orderStatus = OrderStatus.CANCELLING;
         addFailureMessages(reasons);
     }
 
-    /** From CANCELLING (compensation) or PENDING (payment never happened). */
+    /**
+     * {@code CANCELLING → CANCELLED} (compensation finished) or
+     * {@code PENDING → CANCELLED} (payment never happened).
+     */
     public void cancel(List<String> reasons) {
         if (orderStatus != OrderStatus.CANCELLING && orderStatus != OrderStatus.PENDING) {
             throw new OrderDomainException("Order is not in a valid state for cancel. Current: " + orderStatus);
@@ -153,7 +180,7 @@ public class Order {
                 .forEach(failureMessages::add);
     }
 
-    // ----- accessors - collections are unmodifiable -----
+    // ----- accessors - collections exposed are unmodifiable -----
     public UUID orderId()                  { return orderId; }
     public UUID customerId()          { return customerId; }
     public UUID restaurantId()        { return restaurantId; }
