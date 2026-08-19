@@ -1,5 +1,6 @@
 package com.allan.food.order.application.service;
 
+import com.allan.food.order.application.exception.OrderNotFoundException;
 import com.allan.food.order.application.port.in.TrackOrderUseCase;
 import com.allan.food.order.application.port.in.command.TrackOrderQuery;
 import com.allan.food.order.application.port.in.command.TrackOrderResponse;

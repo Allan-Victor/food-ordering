@@ -161,7 +161,7 @@ public class Order {
      * sealed inside this aggregate. The root assembles them — symmetric with how
      * {@code create} assembles {@link ConfirmedItem}s.
      */
-    static Order reconstitute(UUID orderId, UUID customerId, UUID restaurantId, UUID trackingId,
+    public static Order reconstitute(UUID orderId, UUID customerId, UUID restaurantId, UUID trackingId,
                               StreetAddress deliveryAddress, Money price,
                               List<PersistedItem> persistedItems, OrderStatus orderStatus,
                               List<String> failureMessages) {
