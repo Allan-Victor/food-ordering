@@ -50,9 +50,40 @@ public class Order {
     private OrderStatus orderStatus;
     private final List<String> failureMessages = new ArrayList<>();
 
+    /**
+     * Sentinel for an aggregate that has never been persisted.
+     *
+     * <p>Not zero: the persistence provider assigns 0 on first insert, so 0 means "written exactly once," not
+     * "never written." Not {@code null}: a nullable version on a domain object invites a
+     * {@code NullPointerException} in code that has no business reasoning about persistence at all.
+     */
+    public static final long NEW_VERSION = -1L;
+
+    /**
+     * Optimistic-locking version, carried by the aggregate.
+     *
+     * <p><b>Why the domain holds a persistence concern — the one place we bend.</b> Vernon treats a version on
+     * the aggregate root as part of aggregate design rather than a mapping detail, and the strict-pure split
+     * forces our hand regardless: the mapper builds a fresh, <i>detached</i> {@code OrderJpaEntity} on every
+     * save, so a version that lived only in the adapter would be discarded on the way out and the lock would
+     * silently never engage. Note this is a plain {@code long} with no annotation — the domain states the fact,
+     * the adapter maps it, and JPA remains invisible from here.
+     *
+     * <p><b>What it protects.</b> Two duplicate {@code PaymentCompleted} messages arriving concurrently both
+     * load a {@code PENDING} order, both call {@link #pay()}, both save. Without a version the second write
+     * silently overwrites the first. With one, the loser gets an {@code OptimisticLockingFailureException}, the
+     * message is redelivered, and the saga's idempotency check then correctly recognises the order as already
+     * paid. The two mechanisms are complementary: the version detects the race, the idempotency check resolves
+     * the retry.
+     *
+     * <p>Mutable and not {@code final}, unlike every other identity-bearing field here, because the provider
+     * increments it on each successful write and the aggregate must carry the new value forward.
+     */
+    private long version;
+
     private Order(UUID orderId, UUID customerId, UUID restaurantId, UUID trackingId,
                  StreetAddress deliveryAddress, Money price,
-                 List<OrderItem> items, OrderStatus orderStatus) {
+                 List<OrderItem> items, OrderStatus orderStatus, long version) {
         this.orderId = orderId;
         this.customerId = customerId;
         this.restaurantId = restaurantId;
@@ -61,6 +92,7 @@ public class Order {
         this.price = price;
         this.items = new ArrayList<>(items);  // defensive copy
         this.orderStatus = orderStatus;
+        this.version = version;
     }
 
     /**
@@ -110,7 +142,7 @@ public class Order {
             throw new OrderDomainException("Total price must be greater than zero");
         }
         return new Order(UUID.randomUUID(), customerId, restaurantId, UUID.randomUUID(),
-                deliveryAddress, price, items, OrderStatus.PENDING);
+                deliveryAddress, price, items, OrderStatus.PENDING, NEW_VERSION);
     }
 
 
@@ -160,11 +192,16 @@ public class Order {
      * assembled {@link OrderItem}s, because {@code OrderItem} construction is
      * sealed inside this aggregate. The root assembles them — symmetric with how
      * {@code create} assembles {@link ConfirmedItem}s.
+     *
+     * <p><strong>Why the version comes back in.</strong> The mapper produces a detached entity on every save,
+     * so the version read from storage must travel through the aggregate to reach the next write. If it did
+     * not, the provider would see a null version, treat the write as an insert, and the optimistic lock would
+     * never engage — a lost update presenting as a successful save.
      */
     public static Order reconstitute(UUID orderId, UUID customerId, UUID restaurantId, UUID trackingId,
                               StreetAddress deliveryAddress, Money price,
                               List<PersistedItem> persistedItems, OrderStatus orderStatus,
-                              List<String> failureMessages) {
+                              List<String> failureMessages, long version) {
 
         List<OrderItem> items = persistedItems.stream()
                 .map(p -> OrderItem.of(
@@ -176,7 +213,7 @@ public class Order {
                 .toList();
 
         Order order = new Order(orderId, customerId, restaurantId, trackingId,
-                deliveryAddress, price, items, orderStatus);
+                deliveryAddress, price, items, orderStatus, version);
 
         if (failureMessages != null) {
             order.failureMessages.addAll(failureMessages);
@@ -244,6 +281,17 @@ public class Order {
     public StreetAddress deliveryAddress() { return deliveryAddress; }
     public Money price()              { return price; }
     public OrderStatus orderStatus()  { return orderStatus; }
+    public long version()              {return version; }
+
+    /**
+     * Whether this aggregate has never been written.
+     *
+     * <p>Exposed so the mapper can express "new" as a question about the aggregate rather than by comparing
+     * against a magic number at the call site. Ordinary domain code has no reason to ask.
+     */
+    public boolean isNew() {
+        return version == NEW_VERSION;
+    }
 
     public List<OrderItem> items() {
         return Collections.unmodifiableList(items);

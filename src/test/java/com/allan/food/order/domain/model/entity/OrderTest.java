@@ -214,7 +214,7 @@ class OrderTest {
 
             Order order = Order.reconstitute(
                     UUID.randomUUID(), CUSTOMER_ID, RESTAURANT_ID, UUID.randomUUID(),
-                    address(), ugx("99999"), items, OrderStatus.PAID, List.of());
+                    address(), ugx("99999"), items, OrderStatus.PAID, List.of(), 3L);
 
             assertThat(order.price()).isEqualTo(ugx("99999"));
             assertThat(order.items()).singleElement()
@@ -228,7 +228,7 @@ class OrderTest {
                     UUID.randomUUID(), CUSTOMER_ID, RESTAURANT_ID, UUID.randomUUID(),
                     address(), ugx("22000"),
                     List.of(new Order.PersistedItem(1, ROLEX_ID, "Rolex", 2, ugx("8000"))),
-                    OrderStatus.CANCELLED, List.of("payment failed"));
+                    OrderStatus.CANCELLED, List.of("payment failed"), 3L);
 
             assertThat(order.orderStatus()).isEqualTo(OrderStatus.CANCELLED);
             assertThat(order.failureMessages()).containsExactly("payment failed");
@@ -243,9 +243,31 @@ class OrderTest {
 
             Order order = Order.reconstitute(
                     UUID.randomUUID(), CUSTOMER_ID, RESTAURANT_ID, UUID.randomUUID(),
-                    address(), ugx("10000"), items, OrderStatus.PENDING, List.of());
+                    address(), ugx("10000"), items, OrderStatus.PENDING, List.of(), 3L);
 
             assertThat(order.items()).extracting(OrderItem::position).containsExactly(7, 9);
+        }
+
+        @Test
+        @DisplayName("a created order is new until it has been persisted")
+        void createdOrderIsNew() {
+            Order order = pendingOrder();
+
+            assertThat(order.version()).isEqualTo(Order.NEW_VERSION);
+            assertThat(order.isNew()).isTrue();
+        }
+
+        @Test
+        @DisplayName("a reconstituted order carries its stored version and is not new")
+        void reconstitutedOrderCarriesItsVersion() {
+            Order order = Order.reconstitute(
+                    UUID.randomUUID(), CUSTOMER_ID, RESTAURANT_ID, UUID.randomUUID(),
+                    address(), ugx("22000"),
+                    List.of(new Order.PersistedItem(1, ROLEX_ID, "Rolex", 2, ugx("8000"))),
+                    OrderStatus.PAID, List.of(), 7L);
+
+            assertThat(order.version()).isEqualTo(7L);
+            assertThat(order.isNew()).isFalse();
         }
     }
 

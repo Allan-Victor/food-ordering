@@ -26,4 +26,14 @@ public interface LoadOrderPort {
      * @return the order if one exists with that tracking id, otherwise empty
      */
     Optional<Order> loadByTrackingId(UUID trackingId);
+
+    /**
+     * Loads an order by its internal identifier.
+     *
+     * <p>Added in Slice 2 for the saga, which correlates replies on {@code orderId} rather than on the
+     * customer-facing tracking id. Two lookup methods on one port is not duplication: they answer different
+     * questions asked by different callers, and the tracking id is deliberately opaque so that a participant
+     * service never sees it.
+     */
+    Optional<Order> loadById(UUID orderId);
 }

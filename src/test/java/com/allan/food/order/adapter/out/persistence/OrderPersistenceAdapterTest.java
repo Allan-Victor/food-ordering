@@ -16,6 +16,7 @@ import java.util.UUID;
 
 import static com.allan.food.order.OrderTestData.*;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 /**
  * Persistence adapter tests against a real (in-memory) database.
@@ -135,17 +136,46 @@ class OrderPersistenceAdapterTest {
     }
 
     @Test
-    @DisplayName("a new aggregate is inserted, and the version is initialised by the provider")
-    void assignsVersionOnInsert() {
+    @DisplayName("a new aggregate inserts at version zero and comes back not-new")
+    void insertAssignsVersionZero() {
+        Order saved = underTest.save(pendingOrder());
+
+        // The domain's -1 sentinel became null on the way in, which is how Spring Data knew to
+        // insert rather than merge; the provider's 0 came back out through reconstitute.
+        assertThat(saved.version()).isZero();
+        assertThat(saved.isNew()).isFalse();
+    }
+
+    @Test
+    @DisplayName("a second write increments the version")
+    void updateIncrementsVersion() {
+        Order saved = underTest.save(pendingOrder());
+        saved.pay();
+
+        Order updated = underTest.save(saved);
+
+        assertThat(updated.version()).isEqualTo(1L);
+        assertThat(updated.orderStatus()).isEqualTo(OrderStatus.PAID);
+    }
+
+    @Test
+    @DisplayName("a concurrent write against a stale version is rejected — the saga's lost-update guard")
+    void staleVersionIsRejected() {
         Order saved = underTest.save(pendingOrder());
         flushAndClear();
 
-        OrderJpaEntity entity = entityManager.find(OrderJpaEntity.class, saved.orderId());
+        // Two handlers load the same order — exactly what duplicate delivery produces.
+        Order first = underTest.loadByTrackingId(saved.trackingId()).orElseThrow();
+        Order second = underTest.loadByTrackingId(saved.trackingId()).orElseThrow();
 
-        // Null before insert (which is how Spring Data knows the entity is new), zero after.
-        // If the field were a primitive long this would still read 0 but the insert would have
-        // been preceded by a needless SELECT.
-        assertThat(entity.getVersion()).isZero();
+        first.pay();
+        underTest.save(first);
+
+        second.pay();
+
+        // Without the version, this would silently overwrite. With it, the loser is told.
+        assertThatExceptionOfType(org.springframework.dao.OptimisticLockingFailureException.class)
+                .isThrownBy(() -> underTest.save(second));
     }
 
     @Test

@@ -5,6 +5,8 @@ import com.allan.food.order.domain.OrderDomainServiceImpl;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.time.Clock;
+
 /**
  * Wires domain-layer objects into the Spring context without annotating them.
  *
@@ -29,5 +31,18 @@ class OrderDomainServiceConfiguration {
     @Bean
     OrderDomainService orderDomainService() {
         return new OrderDomainServiceImpl();
+    }
+
+    /**
+     * The application's source of time.
+     *
+     * <p>Injected rather than reaching for {@code Instant.now()} because saga messages are timestamped, and a
+     * test that cannot control time cannot assert on a timestamp. It also becomes load-bearing at Slice 3,
+     * where stuck-saga detection is entirely a question of elapsed time. Standard practice in any system where
+     * time is data rather than incidental.
+     */
+    @Bean
+    Clock clock() {
+        return Clock.systemUTC();
     }
 }

@@ -5,8 +5,8 @@ import com.allan.food.order.domain.model.entity.OrderItem;
 import com.allan.food.order.domain.model.valueobject.Money;
 import com.allan.food.order.domain.model.valueobject.StreetAddress;
 
+import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.Currency;
 import java.util.List;
 
 /**
@@ -52,27 +52,31 @@ final class OrderPersistenceMapper {
      * <p><b>A fresh entity every time, deliberately — and this is the real bill for strict purity.</b> Because
      * the domain object is not a managed entity, we cannot mutate a loaded row and let Hibernate's dirty
      * checking emit a minimal {@code UPDATE}; we hand the provider a detached graph and it works out the
-     * difference. Slice 1 never notices, since the only write path is an insert. From Slice 2 the item
-     * collection is rewritten wholesale on every update. That is a genuine, measurable cost — worth carrying
-     * knowingly, and worth remembering when someone asks why the pragmatic style is so common.
+     * difference. From Slice 2 the item collection is therefore rewritten wholesale on every update. That is a
+     * genuine, measurable cost, worth carrying knowingly.
      *
-     * <p>{@code version} is intentionally left null. Spring Data reads a null non-primitive version as "new"
-     * and inserts without a preceding {@code SELECT} — see {@link OrderJpaEntity}. When the aggregate itself
-     * carries a version in Slice 2, this is the single line that changes.
+     * <p><b>Version translation is where the two newness conventions meet.</b> The domain uses
+     * {@link Order#NEW_VERSION} for "never persisted"; Spring Data uses a null non-primitive version for the
+     * same idea. Mapping the sentinel to {@code null} is what lets a new aggregate be inserted without a
+     * preceding {@code SELECT}, and mapping a real version through is what arms the optimistic lock on an
+     * update. Both halves are needed, and getting either wrong fails silently rather than loudly — an
+     * always-null version means the lock never engages, an always-non-null one means every insert is preceded
+     * by a pointless select and a merge.
      */
     static OrderJpaEntity toJpaEntity(Order order) {
         return OrderJpaEntity.builder()
                 .id(order.orderId())
+                .version(order.isNew() ? null : order.version())
                 .customerId(order.customerId())
                 .restaurantId(order.restaurantId())
                 .trackingId(order.trackingId())
                 .price(toMoneyEmbeddable(order.price()))
                 .deliveryAddress(toAddressEmbeddable(order.deliveryAddress()))
                 .orderStatus(order.orderStatus())
-                .items(order.items().stream()
+                .items(new ArrayList<>(order.items().stream()
                         .map(OrderPersistenceMapper::toItemEmbeddable)
-                        .toList())
-                .failureMessages(List.copyOf(order.failureMessages()))
+                        .toList()))
+                .failureMessages(new ArrayList<>(order.failureMessages()))
                 .build();
     }
 
@@ -104,7 +108,8 @@ final class OrderPersistenceMapper {
                 toMoney(entity.getPrice()),
                 items,
                 entity.getOrderStatus(),
-                List.copyOf(entity.getFailureMessages()));
+                List.copyOf(entity.getFailureMessages()),
+                entity.getVersion() == null ? Order.NEW_VERSION : entity.getVersion());
     }
 
     // ---------------------------------------------------------------------

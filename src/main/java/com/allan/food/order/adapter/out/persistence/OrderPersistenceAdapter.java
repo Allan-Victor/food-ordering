@@ -57,17 +57,30 @@ class OrderPersistenceAdapter implements SaveOrderPort, LoadOrderPort {
                 .map(OrderPersistenceMapper::toDomain);
     }
 
+    @Override
+    public Optional<Order> loadById(UUID orderId) {
+        return orderJpaRepository.findById(orderId)
+                .map(OrderPersistenceMapper::toDomain);
+    }
+
     /**
      * {@inheritDoc}
      *
-     * <p>Maps back out of the saved entity rather than returning the argument. In Slice 1 the two are equal and
-     * this is pure ceremony; from Slice 2 it is the line that carries the provider-assigned {@code version}
-     * into the domain, so writing it now means that slice changes nothing here. Cheap insurance, and it keeps
-     * the port's contract honest: what comes back is what is stored, not what was asked for.
+     * <p>Maps back out of the saved entity rather than returning the argument, so the caller receives the
+     * version the provider just assigned. From Slice 2 this is load-bearing rather than ceremonial: a saga step
+     * that saves and then continues working with the pre-save aggregate would hold a stale version and fail its
+     * next write.
+     *
+     * <p><b>The flush is what makes the lock useful.</b> Without it, Spring Data queues the update and the
+     * conflict surfaces at commit — outside this adapter, outside the service, in the transaction
+     * infrastructure, with a stack trace pointing at nothing in particular. Flushing here converts it into an
+     * {@code OptimisticLockingFailureException} thrown from the line that caused it. The cost is one early
+     * round trip; the benefit is a diagnosable failure and, more importantly, a failure the caller can still
+     * catch and act on.
      */
     @Override
     public Order save(Order order) {
-        OrderJpaEntity saved = orderJpaRepository.save(OrderPersistenceMapper.toJpaEntity(order));
+        OrderJpaEntity saved = orderJpaRepository.saveAndFlush(OrderPersistenceMapper.toJpaEntity(order));
         return OrderPersistenceMapper.toDomain(saved);
     }
 
