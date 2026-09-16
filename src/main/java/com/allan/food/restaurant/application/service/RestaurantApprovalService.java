@@ -2,6 +2,7 @@ package com.allan.food.restaurant.application.service;
 
 import com.allan.food.restaurant.application.port.in.RestaurantCommandListener;
 import com.allan.food.restaurant.application.port.out.ApprovalPersistencePort;
+import com.allan.food.restaurant.application.port.out.LoadAvailabilityPort;
 import com.allan.food.restaurant.application.port.out.RestaurantReplyPort;
 import com.allan.food.restaurant.domain.model.OrderApproval;
 import com.allan.food.restaurant.domain.model.RestaurantAvailability;
@@ -54,11 +55,13 @@ class RestaurantApprovalService implements RestaurantCommandListener {
     private static final Logger log = LoggerFactory.getLogger(RestaurantApprovalService.class);
 
     private final ApprovalPersistencePort persistence;
+    private final LoadAvailabilityPort availability;
     private final RestaurantReplyPort replyPort;
     private final Clock clock;
 
-    RestaurantApprovalService(ApprovalPersistencePort persistence, RestaurantReplyPort replyPort, Clock clock) {
+    RestaurantApprovalService(ApprovalPersistencePort persistence, LoadAvailabilityPort availability, RestaurantReplyPort replyPort, Clock clock) {
         this.persistence = persistence;
+        this.availability = availability;
         this.replyPort = replyPort;
         this.clock = clock;
     }
@@ -90,7 +93,7 @@ class RestaurantApprovalService implements RestaurantCommandListener {
                         return;
                     }
 
-                    Optional<RestaurantAvailability> found = persistence.findAvailability(command.restaurantId());
+                    Optional<RestaurantAvailability> found = availability.findAvailability(command.restaurantId());
                     if (found.isEmpty()) {
                         reject(command, List.of("Restaurant %s is not known to this service"
                                 .formatted(command.restaurantId())));

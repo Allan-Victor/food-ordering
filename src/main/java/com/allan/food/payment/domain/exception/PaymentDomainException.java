@@ -1,5 +1,7 @@
 package com.allan.food.payment.domain.exception;
 
+import java.io.Serial;
+
 /**
  * A payment domain rule was violated.
  *
@@ -9,7 +11,15 @@ package com.allan.food.payment.domain.exception;
  * redeploys. Two nearly-identical exception classes is the cheaper problem.
  */
 public class PaymentDomainException extends RuntimeException {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
+
     public PaymentDomainException(String message) {
         super(message);
+    }
+
+    public PaymentDomainException(String message, Throwable cause) {
+        super(message, cause);
     }
 }

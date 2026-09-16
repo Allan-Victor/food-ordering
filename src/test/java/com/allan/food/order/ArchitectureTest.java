@@ -1,10 +1,13 @@
 package com.allan.food.order;
 
 import com.allan.food.order.domain.model.entity.Order;
+import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.library.Architectures;
+import com.tngtech.archunit.library.dependencies.SlicesRuleDefinition;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -128,6 +131,25 @@ class ArchitectureTest {
                 .orShould().dependOnClassesThat().haveFullyQualifiedName(
                         "org.springframework.beans.factory.annotation.Autowired")
                 .because("constructor injection keeps fields final and dependencies visible")
+                .check(classes);
+    }
+
+    @Test
+    @DisplayName("no context reaches into another's internals")
+    void contextsDoNotShareInternals() {
+        // The order, payment and restaurant contexts may know only the saga contract and each other's
+        // messages. A single import across these boundaries — an Order in the payment context, a
+        // shared Money, a repository reaching another context's table — is the change that turns the
+        // Slice 4 split from a deployment exercise into a rewrite.
+        SlicesRuleDefinition.slices()
+                .matching("com.allan.food.(*)..")
+                .namingSlices("$1 context")
+                .as("Bounded contexts")
+                .should().notDependOnEachOther()
+                .ignoreDependency(
+                        DescribedPredicate.alwaysTrue(),
+                        JavaClass.Predicates.resideInAPackage("..saga.contract.."))
+                .because("contexts communicate through the saga contract and nothing else")
                 .check(classes);
     }
 }

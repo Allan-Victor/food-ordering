@@ -27,4 +27,6 @@ class ModularityTest {
                 .writeModulesAsPlantUml()
                 .writeIndividualModulesAsPlantUml();
     }
+
+
 }

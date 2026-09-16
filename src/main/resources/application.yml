@@ -1,6 +1,8 @@
 spring:
   application:
     name: order-service
+  profiles:
+    active: dev
 
   # H2 in-memory: zero external setup for Slice 1.
   # The domain/application layers never see this — only the
@@ -34,3 +36,8 @@ logging:
   level:
     com.allan.food: DEBUG
     org.hibernate.SQL: DEBUG
+
+# So that the MDC ids actually appear
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{sagaId:-}] [%X{orderId:-}] %logger{36} - %msg%n"
+

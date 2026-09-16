@@ -15,10 +15,6 @@ import java.util.UUID;
  * <p>{@link #findApprovalByOrderId} is the idempotency lookup — the participant's ability to recognise a
  * repeated command is a persistence question before it is a logic question.
  *
- * <p>{@link #findAvailability} is a read of authoritative context-owned data, not a replica lookup. In Slice 2
- * the adapter serves it from a seeded in-memory source; in a real deployment it would be maintained by the
- * restaurant's own operational tooling. Either way the port is unchanged, which is the point of stating it as
- * one.
  */
 public interface ApprovalPersistencePort {
 
@@ -27,5 +23,4 @@ public interface ApprovalPersistencePort {
 
     OrderApproval saveApproval(OrderApproval approval);
 
-    Optional<RestaurantAvailability> findAvailability(UUID restaurantId);
 }
