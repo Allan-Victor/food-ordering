@@ -15,7 +15,7 @@
 
 @ApplicationModule(
         displayName = "Restaurant",
-        allowedDependencies = {"saga.contract"}
+        allowedDependencies = {"saga.contract", "temporal"}
 )
 
 package com.allan.food.restaurant;

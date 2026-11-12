@@ -104,6 +104,21 @@
             <artifactId>spring-modulith-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Temporal dependencies needed to compile, build,
+      test, and run Temporal's Java SDK-->
+        <dependency>
+            <groupId>io.temporal</groupId>
+            <artifactId>temporal-sdk</artifactId>
+            <version>1.31.0</version>
+        </dependency>
+
+        <dependency>
+            <!--Testing-->
+            <groupId>io.temporal</groupId>
+            <artifactId>temporal-testing</artifactId>
+            <version>1.31.0</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

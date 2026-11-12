@@ -149,7 +149,11 @@ class ArchitectureTest {
                 .ignoreDependency(
                         DescribedPredicate.alwaysTrue(),
                         JavaClass.Predicates.resideInAPackage("..saga.contract.."))
-                .because("contexts communicate through the saga contract and nothing else")
+                .ignoreDependency(
+                        DescribedPredicate.alwaysTrue(),
+                        JavaClass.Predicates.resideInAPackage("..temporal.."))
+                .because("contexts communicate through the saga contract and nothing else, "
+                        + "plus the Temporal workflow/activity contracts this comparison branch adds")
                 .check(classes);
     }
 }
